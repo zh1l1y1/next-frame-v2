@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXT FRAME V2 — Anime Taste</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: #0f0f14; color: #e0e0e0; }
+    .app { max-width: 1200px; margin: 0 auto; min-height: 100vh; }
+
+    /* Topbar */
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid #222; }
+    .brand { color: #5b8def; font-size: 18px; font-weight: 700; text-decoration: none; }
+    .brand small { font-size: 11px; color: #5b8def88; margin-left: 4px; }
+
+    nav { display: flex; gap: 16px; }
+    nav a { color: #888; text-decoration: none; font-size: 14px; }
+    nav a.active { color: #5b8def; }
+
+    /* Seed page */
+    .seed-page { padding: 40px 24px; }
+    .seed-hero { text-align: center; margin-bottom: 32px; }
+    .seed-hero h1 { font-size: 28px; margin-bottom: 8px; }
+    .seed-hero p { color: #888; }
+    .seed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .seed-card { position: relative; border-radius: 12px; overflow: hidden; cursor: pointer; border: 3px solid transparent; transition: all .15s; background: #1a1a24; }
+    .seed-card:hover { transform: scale(1.03); }
+    .seed-card.selected { border-color: #5b8def; }
+    .seed-card img { width: 100%; aspect-ratio: 3/4; object-fit: cover; }
+    .seed-info { padding: 8px 10px; }
+    .seed-info h3 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .seed-info span { font-size: 11px; color: #888; }
+    .checkmark { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; background: #5b8def; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #fff; }
+    .seed-footer { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+    .seed-footer button { padding: 12px 32px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    .seed-footer button:not(.skip) { background: #5b8def; color: #fff; }
+    .seed-footer button:disabled { opacity: 0.4; cursor: default; }
+    .seed-footer .skip { background: transparent; color: #888; border: 1px solid #333; }
+
+    /* Card flow */
+    .card-page { padding: 40px 24px; display: flex; flex-direction: column; align-items: center; }
+    .card-stage { max-width: 520px; width: 100%; }
+    .taste-card { background: #1a1a24; border-radius: 16px; overflow: hidden; margin-bottom: 20px; }
+    .card-cover img { width: 100%; max-height: 360px; object-fit: cover; }
+    .card-body { padding: 16px 20px; }
+    .card-channel { display: inline-block; background: #2a2a38; color: #5b8def; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; }
+    .card-body h2 { font-size: 20px; margin-bottom: 4px; }
+    .card-original { color: #666; font-size: 13px; margin-bottom: 8px; }
+    .card-meta { display: flex; gap: 12px; font-size: 13px; color: #888; margin-bottom: 12px; }
+    .card-reasons { margin-bottom: 12px; }
+    .card-reasons em { display: block; color: #5b8def88; font-size: 12px; font-style: normal; }
+    .card-reasons em::before { content: "→ "; }
+    details { margin-bottom: 12px; cursor: pointer; color: #666; font-size: 13px; }
+    details p { margin-top: 8px; color: #aaa; }
+    .card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .card-tags span { background: #2a2a38; color: #888; font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+
+    /* Rating bar */
+    .rating-bar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .rating-bar button { padding: 10px 16px; border: 1px solid #333; border-radius: 8px; font-size: 13px; cursor: pointer; background: #1a1a24; color: #ddd; transition: all .1s; }
+    .rating-bar button:hover { transform: scale(1.05); }
+    .rate-masterpiece { border-color: #ffd70088 !important; }
+    .rate-masterpiece:hover { background: #ffd70022; }
+    .rate-interesting:hover { background: #5b8def22; }
+    .rate-average:hover { background: #88888822; }
+    .rate-mild-dislike:hover { background: #ff660022; }
+    .rate-terrible { border-color: #ff444488 !important; }
+    .rate-terrible:hover { background: #ff444422; }
+    .unseen-row { width: 100%; display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
+    .rate-wishlist { border-color: #44ff4488 !important; }
+    .rate-avoid:hover { background: #ff444422; }
+
+    .card-footer { margin-top: 20px; color: #666; font-size: 13px; text-align: center; }
+
+    /* Profile */
+    .profile-page { padding: 40px 24px; }
+    .profile-page h1 { font-size: 24px; margin-bottom: 24px; }
+    .profile-stats { display: flex; gap: 24px; margin-bottom: 32px; }
+    .stat b { display: block; font-size: 32px; }
+    .stat span { color: #888; font-size: 13px; }
+    .profile-actions { display: flex; gap: 12px; }
+    .profile-actions button { padding: 8px 20px; border: 1px solid #333; border-radius: 8px; background: #1a1a24; color: #ddd; cursor: pointer; }
+    .profile-actions .danger { border-color: #ff444488; color: #ff4444; }
+
+    /* Loading */
+    .loading { text-align: center; padding: 60px; color: #666; font-size: 16px; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .seed-grid { grid-template-columns: repeat(2, 1fr); }
+      .rating-bar button { flex: 1 1 30%; font-size: 12px; padding: 8px; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "preact": "https://esm.sh/preact@10.24.3",
+        "preact/hooks": "https://esm.sh/preact@10.24.3/hooks",
+        "htm/preact": "https://esm.sh/htm@3.1.1/preact"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    import { h, render } from "preact";
+    import { useState, useEffect, useCallback } from "preact/hooks";
+    import { html } from "htm/preact";
+
+    const API = "/api/v2";
+
+    // State management
+    const EVENTS_KEY = "anime-v2-events";
+    function loadEvents() { try { return JSON.parse(localStorage.getItem(EVENTS_KEY) || "[]"); } catch { return []; } }
+    function saveEvents(events) { localStorage.setItem(EVENTS_KEY, JSON.stringify(events.slice(-1000))); }
+
+    function SeedPage({ onStart }) {
+      const [seeds, setSeeds] = useState([]);
+      const [selected, setSelected] = useState(new Set());
+
+      useEffect(() => {
+        fetch(`${API}/onboarding`).then(r=>r.json()).then(d => setSeeds(d.items || [])).catch(() => {
+          fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({action:"seed-list"}), headers:{"content-type":"application/json"} })
+            .then(r=>r.json()).then(d => setSeeds(d.items || []));
+        });
+      }, []);
+
+      const toggle = id => { const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next); };
+
+      return html`<main class="seed-page">
+        <div class="seed-hero">
+          <h1>Select anime you've watched and liked</h1>
+          <p>We'll understand your taste from your picks — just pick what you like</p>
+        </div>
+        <div class="seed-grid">${seeds.map(anime => html`
+          <div class="seed-card ${selected.has(anime.id) ? 'selected' : ''}" onClick=${() => toggle(anime.id)} key=${anime.id}>
+            ${anime.cover && html`<img src=${anime.cover} alt=${anime.title} loading="lazy" />`}
+            <div class="seed-info"><h3>${anime.title}</h3><span>${anime.year || "—"} · ★ ${anime.score?.toFixed(1)}</span></div>
+            ${selected.has(anime.id) && html`<div class="checkmark">✓</div>`}
+          </div>`)}
+        </div>
+        <div class="seed-footer">
+          <span>${selected.size} selected</span>
+          <button disabled=${selected.size < 1} onClick=${() => { const evts = [...selected].map(id => ({animeId:id, action:"like", context:"onboarding", at:Date.now()})); saveEvents(evts); onStart(evts); }}>Start</button>
+          <button class="skip" onClick=${() => onStart([])}>Skip, use popular</button>
+        </div>
+      </main>`;
+    }
+
+    function CardFlow({ events, onEvents }) {
+      const [queue, setQueue] = useState([]);
+      const [rated, setRated] = useState(0);
+      const [loading, setLoading] = useState(false);
+
+      const refetch = useCallback(() => {
+        setLoading(true);
+        fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({events, limit: 30}), headers: {"content-type":"application/json"} })
+          .then(r => r.json())
+          .then(d => { setQueue(d.items || []); setLoading(false); })
+          .catch(e => { console.error('Fetch failed:', e); setLoading(false); setQueue([]); });
+      }, [events]);
+
+      useEffect(() => { refetch(); }, [JSON.stringify(events)]);
+
+      const rate = (action) => {
+        const current = queue[0];
+        if (!current) return;
+        if (events.some(e => e.animeId === current.id && e.action !== "click" && e.action !== "skip")) { setQueue(queue.slice(1)); return; }
+        if (!current) return;
+        const event = { animeId: current.id, action, context: "recommendation", at: Date.now() };
+        const newEvents = [...events, event];
+        saveEvents(newEvents);
+        onEvents(newEvents);
+        setRated(rated + 1);
+        setQueue(queue.slice(1));
+        if (queue.length < 10) refetch();
+      };
+
+      if (loading && queue.length === 0) return html`<div class="loading">Generating your recommendations...</div>`;
+      const current = queue[0];
+      if (!current) return html`<div class="loading">No more anime in this catalog. How about adding some new ones?</div>`;
+
+      return html`<main class="card-page">
+        <div class="card-stage">
+          <article class="taste-card">
+            <div class="card-cover">${current.cover && html`<img src=${current.cover} alt=${current.title} />`}</div>
+            <div class="card-body">
+              <span class="card-channel">${current.channel || "Recommended"}</span>
+              <h2>${current.title}</h2>
+              <p class="card-original">${current.titleOriginal || ""}</p>
+              <div class="card-meta"><span>${current.year || "—"}</span><span>${current.type || ""}</span><span>★ ${current.score?.toFixed(1) || "—"}</span>${current.ratingCount ? html`<span>${(current.ratingCount/1000).toFixed(0)}k ratings</span>` : ""}</div>
+              <div class="card-reasons">${(current.reasons || []).map(r => html`<em>${r}</em>`)}</div>
+              ${current.description && html`<details><summary>Synopsis</summary><p>${current.description.slice(0, 280)}</p></details>`}
+              <div class="card-tags">${(current.categories || []).slice(0,4).map(t => html`<span>${t}</span>`)}</div>
+            </div>
+          </article>
+          <div class="rating-bar">
+            <button class="rate-masterpiece" onClick=${() => rate("masterpiece")}>★ Masterpiece</button>
+            <button class="rate-interesting" onClick=${() => rate("interesting")}>♥ Interesting</button>
+            <button class="rate-average" onClick=${() => rate("average")}>○ Average</button>
+            <button class="rate-mild-dislike" onClick=${() => rate("mild_dislike")}>− Mild Dislike</button>
+            <button class="rate-terrible" onClick=${() => rate("terrible")}>✕ Terrible</button>
+            <div class="unseen-row">
+              <button class="rate-wishlist" onClick=${() => rate("wishlist")}>+ Want to Watch</button>
+              <button class="rate-avoid" onClick=${() => rate("avoid")}>! Not Interested</button>
+              <button class="rate-skip" onClick=${() => rate("skip")}>Skip</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">Rated: ${rated} · Queue: ${queue.length}</div>
+      </main>`;
+    }
+
+    function Profile({ events }) {
+      const counts = {};
+      for (const e of events) { if (e.action === "click") continue; counts[e.action] = (counts[e.action] || 0) + 1; }
+      const exportData = () => { const b = new Blob([JSON.stringify(events,null,2)],{type:"application/json"}); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "anime-v2-events.json"; a.click(); };
+      const importData = () => { const i = document.createElement("input"); i.type="file"; i.onchange = async e => { const t = await e.target.files[0].text(); if(confirm(`Import ${JSON.parse(t).length} events?`)) { localStorage.setItem(EVENTS_KEY, JSON.stringify(JSON.parse(t))); location.reload(); } }; i.click(); };
+      const reset = () => { if(confirm("Reset?")) { localStorage.removeItem(EVENTS_KEY); location.href="/v2"; } };
+
+      return html`<main class="profile-page">
+        <h1>Your Anime Taste</h1>
+        <div class="profile-stats">
+          <div class="stat"><b>${events.length}</b><span>Signals</span></div>
+          <div class="stat"><b>${counts.masterpiece || 0}</b><span>Masterpieces</span></div>
+          <div class="stat"><b>${counts.wishlist || 0}</b><span>Want to Watch</span></div>
+          <div class="stat"><b>${(counts.interesting||0) + (counts.like||0) + (counts.masterpiece||0)}</b><span>Positive</span></div>
+        </div>
+        <div class="profile-actions">
+          <button onClick=${exportData}>Export Data</button>
+          <button onClick=${importData}>Import Data</button>
+          <button class="danger" onClick=${reset}>Reset All</button>
+        </div>
+      </main>`;
+    }
+
+    function App() {
+      const [events, setEvents] = useState(loadEvents);
+      const [view, setView] = useState("home");
+      const hasStarted = events.length > 0;
+      const activeView = view === "home" && hasStarted ? "recommend" : view;
+
+      return html`<div class="app">
+        <header class="topbar">
+          <a class="brand" href="#" onClick=${()=>setView("home")}>NEXT FRAME <small>V2</small></a>
+          <nav>
+            <a href="#" class=${activeView==="home"?"active":""} onClick=${()=>setView("home")}>Home</a>
+            <a href="#" class=${activeView==="recommend"?"active":""} onClick=${()=>setView("recommend")}>Recommend</a>
+            <a href="#" class=${activeView==="profile"?"active":""} onClick=${()=>setView("profile")}>Profile <small>${events.length}</small></a>
+          </nav>
+        </header>
+        ${activeView === "recommend" && html`<${CardFlow} events=${events} onEvents=${(evts) => { setEvents(evts); }} />`}
+        ${activeView === "profile" && html`<${Profile} events=${events} />`}
+        ${activeView === "home" && !hasStarted && html`<${SeedPage} onStart=${(evts) => { setEvents(evts); setView("recommend"); }} />`}
+      </div>`;
+    }
+
+    render(h(App), document.getElementById("app"));
+  </script>
+</body>
+</html>

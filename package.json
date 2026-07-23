@@ -1,0 +1,13 @@
+{
+  "name": "next-frame-v2",
+  "version": "2.0.0",
+  "description": "NEXT FRAME — Anime taste discovery engine powered by BPR collaborative filtering",
+  "main": "standalone-server.mjs",
+  "scripts": {
+    "start": "node standalone-server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}
