@@ -44,38 +44,49 @@ function resolveSeries(animeId) {
   return animeToSeries[animeId] || animeId;
 }
 
-// ─── Seed cards (DPP diversity sampling) ───
+// ─── Seed cards (manually curated broadly-known titles + popular fillers) ───
 function getSeedCards(count) {
-  const pool = catalog.filter(a => (a.members || 0) > 5000 && a.score > 7.5 && a.year >= 2000 && a.year <= 2024);
-  if (pool.length < count) return catalog.sort((a, b) => b.members - a.members).slice(0, count);
+  // Universally known anime across eras — series IDs (cleaned title keys after merge)
+  const evergreenIDs = [
+    "进击的巨人", "命运石之门", "死亡笔记", "魔法少女小圆",
+    "新世纪福音战士", "星际牛仔", "Code Geass 反叛的鲁路修",
+    "CLANNAD", "龙与虎", "冰菓",
+    "天使的心跳", "Fate Zero",
+    "刀剑神域", "Re 从零开始的异世界生活",
+    "鬼灭之刃", "咒术回战",
+    "孤独摇滚", "间谍过家家",
+    "千与千寻", "哈尔的移动城堡", "你的名字",
+    "名侦探柯南", "航海王",
+    "龙猫", "幽灵公主", "天空之城",
+    "机动战士高达", "银魂", "夏目友人帐",
+  ];
 
-  // k-means++ style diversity selection
-  const result = [];
-  const first = pool.find(a => a.score > 8.5 && a.members > 30000) || pool[0];
-  result.push(first);
-  const indices = [pool.indexOf(first)];
+  const catMap = new Map(catalog.map(a => [a.id, a]));
+  const exact = [], foundTitles = new Set();
 
-  while (result.length < count) {
-    let bestD2 = -1, bestIdx = -1;
-    for (let i = 0; i < pool.length; i++) {
-      if (indices.includes(i)) continue;
-      const ai = idToIndex.get(pool[i].id);
-      if (ai === undefined) continue;
-      let minD2 = Infinity;
-      for (const j of indices) {
-        const aj = idToIndex.get(pool[j].id);
-        if (aj === undefined) continue;
-        const cosSim = cosine(factors[ai], factors[aj]);
-        const d2 = 1 - cosSim;
-        if (d2 < minD2) minD2 = d2;
-      }
-      minD2 = minD2 * (1 + Math.random() * 0.3);
-      if (minD2 > bestD2) { bestD2 = minD2; bestIdx = i; }
-    }
-    if (bestIdx === -1) break;
-    result.push(pool[bestIdx]);
-    indices.push(bestIdx);
+  for (const title of evergreenIDs) {
+    const entry = catMap.get(title);
+    if (!entry) continue;
+    const root = title.replace(/[^一-鿿぀-ヿa-zA-Z\d]/g, '').slice(0, 6);
+    if (foundTitles.has(root)) continue;
+    foundTitles.add(root);
+    exact.push(entry);
   }
+
+  // Fill remaining slots from top members, skipping duplicates
+  const top = [...catalog]
+    .filter(a => a.members > 15000 && a.score >= 7.0 && a.year >= 1995 && a.year <= 2025)
+    .sort((a, b) => b.members - a.members);
+
+  const result = [...exact];
+  for (const a of top) {
+    if (result.length >= count) break;
+    const root = (a.title || '').replace(/[^一-鿿぀-ヿa-zA-Z\d]/g, '').slice(0, 6);
+    if (foundTitles.has(root)) continue;
+    foundTitles.add(root);
+    result.push(a);
+  }
+
   return result.slice(0, count);
 }
 
