@@ -1,6 +1,8 @@
 # NEXT FRAME v2
 
-一个正在锐意 **vibe coding** 中的日本动画推荐系统。🚧
+next-frame-v2-production.up.railway.app
+
+一个正在锐意 **vibe coding** 中的番剧推荐系统。🚧
 
 目前项目基于 Bangumi 的匿名用户交互数据，使用 **BPR（Bayesian Personalized Ranking）** 训练用户与番剧的隐向量，并据此做一个简单的个性化推荐流程：
 
@@ -51,7 +53,7 @@ BPR 矩阵分解训练
 
 ## 数据说明
 
-项目使用 Bangumi 相关公开数据与匿名交互数据进行实验。数据与模型仅用于学习、研究和个人项目验证，请遵守对应数据源的使用规范。
+项目使用 Bangumi 相关公开数据进行实验。数据与模型仅用于学习、研究和个人项目验证，请遵守对应数据源的使用规范。
 
 ## License
 
