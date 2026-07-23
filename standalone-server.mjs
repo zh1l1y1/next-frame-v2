@@ -1,4 +1,4 @@
-// V2 standalone server — merged series mode
+// V2 standalone server — flat catalog, seriesKey dedup
 // 用法: node v2/standalone-server.mjs [--port=3002]
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -6,7 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = parseInt(process.argv.find(a => a.startsWith("--port="))?.slice(7) || "3002");
+const PORT = parseInt(process.env.PORT || process.argv.find(a => a.startsWith("--port="))?.slice(7) || "3002");
 
 // ─── Load data ───
 const catalog = JSON.parse(readFileSync(resolve(__dirname, "data", "catalog", "expanded-anime.json"), "utf8"));
@@ -14,14 +14,11 @@ const modelData = JSON.parse(readFileSync(resolve(__dirname, "data", "models", "
 const factors = modelData.item_factors;
 const nItems = modelData.n_items;
 
-// Anime ID → Series ID lookup (maps user event IDs to merged series IDs)
-const animeToSeries = JSON.parse(readFileSync(resolve(__dirname, "data", "catalog", "anime-to-series.json"), "utf8"));
-
-// Series ID → model index
 const idToIndex = new Map();
 modelData.ids.forEach((id, i) => idToIndex.set(id, i));
+const catMap = new Map(catalog.map(a => [a.id, a]));
 
-console.log(`V2 Server: catalog=${catalog.length} series model=${nItems}x${factors[0].length}D port=${PORT}`);
+console.log(`V2 Server: catalog=${catalog.length} model=${nItems}x${factors[0].length}D port=${PORT}`);
 
 // ─── Math utils ───
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
@@ -39,41 +36,40 @@ function centroid(items, weights) {
   return c;
 }
 
-// ─── Resolve anime ID → series ID ───
-function resolveSeries(animeId) {
-  return animeToSeries[animeId] || animeId;
-}
-
-// ─── Seed cards (manually curated broadly-known titles + popular fillers) ───
+// ─── Seed cards ───
 function getSeedCards(count) {
-  // Universally known anime across eras — series IDs (cleaned title keys after merge)
   const evergreenIDs = [
     "进击的巨人", "命运石之门", "死亡笔记", "魔法少女小圆",
     "新世纪福音战士", "星际牛仔", "Code Geass 反叛的鲁路修",
-    "CLANNAD", "龙与虎", "冰菓",
-    "天使的心跳", "Fate Zero",
-    "刀剑神域", "Re 从零开始的异世界生活",
+    "龙与虎", "冰菓",
+    "天使的心跳", "Fate/Zero",
+    "刀剑神域", "Re：从零开始的异世界生活",
     "鬼灭之刃", "咒术回战",
-    "孤独摇滚", "间谍过家家",
-    "千与千寻", "哈尔的移动城堡", "你的名字",
+    "孤独摇滚！", "间谍过家家",
+    "千与千寻", "哈尔的移动城堡", "你的名字。",
     "名侦探柯南", "航海王",
     "龙猫", "幽灵公主", "天空之城",
-    "机动战士高达", "银魂", "夏目友人帐",
+    "银魂", "夏目友人帐",
   ];
 
-  const catMap = new Map(catalog.map(a => [a.id, a]));
-  const exact = [], foundTitles = new Set();
+  // Dedup by seriesKey
+  const usedSeries = new Set();
+  const exact = [];
 
+  // First pass: try exact title match, pick the one with highest members per seriesKey
   for (const title of evergreenIDs) {
-    const entry = catMap.get(title);
-    if (!entry) continue;
-    const root = title.replace(/[^一-鿿぀-ヿa-zA-Z\d]/g, '').slice(0, 6);
-    if (foundTitles.has(root)) continue;
-    foundTitles.add(root);
-    exact.push(entry);
+    const matches = catalog.filter(a => a.title === title);
+    if (!matches.length) continue;
+    // Pick the match with most members but dedup by seriesKey
+    let best = null;
+    for (const m of matches) {
+      if (usedSeries.has(m.seriesKey)) continue;
+      if (!best || (m.members || 0) > (best.members || 0)) best = m;
+    }
+    if (best) { usedSeries.add(best.seriesKey); exact.push(best); }
   }
 
-  // Fill remaining slots from top members, skipping duplicates
+  // Fill remaining with popular anime, dedup by seriesKey
   const top = [...catalog]
     .filter(a => a.members > 15000 && a.score >= 7.0 && a.year >= 1995 && a.year <= 2025)
     .sort((a, b) => b.members - a.members);
@@ -81,9 +77,8 @@ function getSeedCards(count) {
   const result = [...exact];
   for (const a of top) {
     if (result.length >= count) break;
-    const root = (a.title || '').replace(/[^一-鿿぀-ヿa-zA-Z\d]/g, '').slice(0, 6);
-    if (foundTitles.has(root)) continue;
-    foundTitles.add(root);
+    if (usedSeries.has(a.seriesKey)) continue;
+    usedSeries.add(a.seriesKey);
     result.push(a);
   }
 
@@ -92,77 +87,74 @@ function getSeedCards(count) {
 
 // ─── Recommend ───
 function recommend(events, limit = 30) {
-  // Map event anime IDs to series IDs
-  const seriesEvents = events.map(e => ({
-    ...e,
-    seriesId: resolveSeries(e.animeId),
-  }));
-
-  const evtSeriesIds = new Set(seriesEvents.map(e => e.seriesId));
-  const posSeriesIds = new Set();
+  const evtSeriesKeys = new Set();
+  const posSeriesKeys = new Set();
   const posWeights = new Map();
 
-  const catalogMap = new Map(catalog.map(a => [a.id, a]));
-
-  for (const e of seriesEvents) {
+  for (const e of events) {
+    const entry = catMap.get(e.animeId);
+    if (!entry) continue;
+    const sk = entry.seriesKey;
+    evtSeriesKeys.add(sk);
     if (["masterpiece","interesting","like","seed","wishlist"].includes(e.action)) {
-      posSeriesIds.add(e.seriesId);
-      posWeights.set(e.seriesId, Math.max(posWeights.get(e.seriesId) || 0,
+      posSeriesKeys.add(sk);
+      posWeights.set(sk, Math.max(posWeights.get(sk) || 0,
         e.action === "masterpiece" ? 1.3 : e.action === "like" ? 0.78 : e.action === "seed" ? 0.72 : 0.46));
     }
   }
 
   // Cold start: popularity
-  if (posSeriesIds.size === 0) {
-    const seenSeries = new Set();
+  if (posSeriesKeys.size === 0) {
+    const seen = new Set();
     const sorted = [...catalog].sort((a, b) => (Math.log1p(b.members) + Math.max(0, (b.year||2000) - 2015) * 0.02) - (Math.log1p(a.members) + Math.max(0, (a.year||2000) - 2015) * 0.02));
     const result = [];
     for (const a of sorted) {
-      if (evtSeriesIds.has(a.id)) continue;
-      if (seenSeries.has(a.id)) continue;
-      seenSeries.add(a.id);
+      if (seen.has(a.seriesKey)) continue;
+      seen.add(a.seriesKey);
       result.push({...a, reasons: ["Popular recommendation"], channel: "Hot"});
       if (result.length >= limit) break;
     }
     return result;
   }
 
-  // Build clusters in BPR space
-  const posItems = [...posSeriesIds].map(id => idToIndex.get(id)).filter(i => i !== undefined);
-  const clusterCentroids = [];
+  // Get BPR factors for liked items (one entry per seriesKey)
+  const likedSeries = [...posSeriesKeys];
+  const likedEntries = likedSeries.map(sk => catalog.find(a => a.seriesKey === sk && idToIndex.has(a.id))).filter(Boolean);
+  const likedItems = likedEntries.map(e => idToIndex.get(e.id)).filter(i => i !== undefined);
 
-  if (posItems.length <= 3) {
-    const vecs = posItems.map(i => factors[i]);
-    const ws = posItems.map((_, i) => {
-      const id = modelData.ids[posItems[i]];
-      return Math.min(1, (posWeights.get(id) || 0.5) / 0.72);
+  // Cluster in BPR space
+  const clusterCentroids = [];
+  if (likedItems.length <= 4) {
+    const vecs = likedItems.map(i => factors[i]);
+    const ws = likedItems.map((_, i) => {
+      const id = modelData.ids[likedItems[i]];
+      return Math.min(1, (posWeights.get(likedSeries[i] || '') || 0.5) / 0.72);
     });
     clusterCentroids.push(centroid(vecs, ws));
   } else {
     const assigned = new Set();
-    for (let i = 0; i < posItems.length; i++) {
+    for (let i = 0; i < likedItems.length; i++) {
       if (assigned.has(i)) continue;
       const cluster = [i];
       assigned.add(i);
-      for (let j = i + 1; j < posItems.length; j++) {
+      for (let j = i + 1; j < likedItems.length; j++) {
         if (assigned.has(j)) continue;
-        const cs = cosine(factors[posItems[i]], factors[posItems[j]]);
-        if (cs > 0.35) { cluster.push(j); assigned.add(j); }
+        if (cosine(factors[likedItems[i]], factors[likedItems[j]]) > 0.35) { cluster.push(j); assigned.add(j); }
       }
-      const vecs = cluster.map(ci => factors[posItems[ci]]);
+      const vecs = cluster.map(ci => factors[likedItems[ci]]);
       const ws = cluster.map(ci => {
-        const id = modelData.ids[posItems[ci]];
-        return Math.min(1, (posWeights.get(id) || 0.5) / 0.72);
+        const id = modelData.ids[likedItems[ci]];
+        return Math.min(1, (posWeights.get(likedSeries[ci] || '') || 0.5) / 0.72);
       });
       clusterCentroids.push(centroid(vecs, ws));
       if (clusterCentroids.length >= 3) {
         const rest = [];
-        for (let j = 0; j < posItems.length; j++) if (!assigned.has(j)) rest.push(j);
+        for (let j = 0; j < likedItems.length; j++) if (!assigned.has(j)) rest.push(j);
         if (rest.length > 0) {
-          const rVecs = rest.map(i => factors[posItems[i]]);
+          const rVecs = rest.map(i => factors[likedItems[i]]);
           const rWs = rest.map(i => {
-            const id = modelData.ids[posItems[i]];
-            return Math.min(1, (posWeights.get(id) || 0.5) / 0.72);
+            const id = modelData.ids[likedItems[i]];
+            return Math.min(1, (posWeights.get(likedSeries[i] || '') || 0.5) / 0.72);
           });
           clusterCentroids.push(centroid(rVecs, rWs));
         }
@@ -171,44 +163,39 @@ function recommend(events, limit = 30) {
     }
   }
 
-  // Score all candidates
+  // Score candidates
   const scores = [];
-  const maxCand = Math.min(4000, nItems);
-  for (let i = 0; i < maxCand; i++) {
+  for (let i = 0; i < nItems; i++) {
     const id = modelData.ids[i];
-    if (evtSeriesIds.has(id)) continue;
+    const entry = catMap.get(id);
+    if (!entry) continue;
+    if (evtSeriesKeys.has(entry.seriesKey)) continue;
     let best = -Infinity;
     for (const c of clusterCentroids) {
       const s = dot(factors[i], c);
       if (s > best) best = s;
     }
-    scores.push({ id, score: best });
-  }
-
-  // Apply bonuses
-  for (const s of scores) {
-    const anime = catalogMap.get(s.id);
-    if (!anime) continue;
-    const popBonus = Math.min(0.12, Math.log1p(anime.members || 1) / Math.log1p(50000) * 0.12);
-    const yearBonus = anime.year && anime.year > 2015 ? Math.min(0.10, (anime.year - 2015) * 0.01) : 0;
-    s.score += popBonus + yearBonus;
-    const popScore2 = Math.log1p(anime.members || 1) / Math.log1p(50000);
-    const noveltyBonus = Math.max(0, (1 - popScore2) * 0.06);
-    s.score += noveltyBonus;
+    const popBonus = Math.min(0.12, Math.log1p(entry.members || 1) / Math.log1p(50000) * 0.12);
+    const yearBonus = entry.year && entry.year > 2015 ? Math.min(0.10, (entry.year - 2015) * 0.01) : 0;
+    const noveltyBonus = Math.max(0, (1 - Math.log1p(entry.members || 1) / Math.log1p(50000)) * 0.06);
+    scores.push({ id, seriesKey: entry.seriesKey, score: best + popBonus + yearBonus + noveltyBonus });
   }
 
   // Negative penalty
-  const avoidedIds = new Set();
-  for (const e of seriesEvents) {
-    if (["avoid","terrible","mild_dislike"].includes(e.action)) avoidedIds.add(e.seriesId);
+  const avoided = new Set();
+  for (const e of events) {
+    const entry = catMap.get(e.animeId);
+    if (entry && ["avoid","terrible","mild_dislike"].includes(e.action)) avoided.add(entry.seriesKey);
   }
-  if (avoidedIds.size > 0) {
+  if (avoided.size > 0) {
     for (const s of scores) {
       const ci = idToIndex.get(s.id);
       if (ci === undefined) continue;
       let maxSim = 0;
-      for (const aid of avoidedIds) {
-        const ai = idToIndex.get(aid);
+      for (const ask of avoided) {
+        const aEntry = catalog.find(a => a.seriesKey === ask && idToIndex.has(a.id));
+        if (!aEntry) continue;
+        const ai = idToIndex.get(aEntry.id);
         if (ai === undefined) continue;
         const sim = cosine(factors[ci], factors[ai]);
         if (sim > maxSim) maxSim = sim;
@@ -217,32 +204,32 @@ function recommend(events, limit = 30) {
     }
   }
 
+  // Sort and dedup by seriesKey
   scores.sort((a, b) => b.score - a.score);
-
-  // Build results (no series dedup needed — already merged)
   const result = [];
-  for (const { id } of scores) {
+  const used = new Set();
+  for (const s of scores) {
     if (result.length >= limit) break;
-    const anime = catalogMap.get(id);
-    if (!anime) continue;
-    if (evtSeriesIds.has(id)) continue;
+    if (used.has(s.seriesKey)) continue;
+    used.add(s.seriesKey);
+    const entry = catMap.get(s.id);
+    if (!entry) continue;
 
-    const similar = [];
-    for (const pid of posSeriesIds) {
-      const pi = idToIndex.get(pid), ci = idToIndex.get(id);
-      if (pi === undefined || ci === undefined) continue;
-      const s = cosine(factors[pi], factors[ci]);
-      similar.push({ title: catalogMap.get(pid)?.title || pid, s });
-    }
-    similar.sort((a, b) => b.s - a.s);
-    const topSim = similar.slice(0, 2);
+    // Similar titles (for reason text)
+    const similar = [...posSeriesKeys].map(sk => {
+      const e = catalog.find(a => a.seriesKey === sk && idToIndex.has(a.id));
+      if (!e) return null;
+      const pi = idToIndex.get(e.id), ci = idToIndex.get(s.id);
+      if (pi === undefined || ci === undefined) return null;
+      return { title: e.title, s: cosine(factors[pi], factors[ci]) };
+    }).filter(Boolean).sort((a,b) => b.s - a.s).slice(0, 2);
 
     result.push({
-      ...anime,
-      reasons: topSim.length > 0
-        ? [`Because you liked \"${topSim[0].title}\"`, topSim.length > 1 ? `and \"${topSim[1].title}\"` : ""].filter(Boolean)
+      ...entry,
+      reasons: similar.length > 0
+        ? [`Because you liked "${similar[0].title}"`, similar.length > 1 ? `and "${similar[1].title}"` : ""].filter(Boolean)
         : ["Recommended based on your taste profile"],
-      channel: posItems.length <= 3 ? "Core Taste" : `${clusterCentroids.length} interest clusters`,
+      channel: likedItems.length <= 3 ? "Core Taste" : `${clusterCentroids.length} interest clusters`,
     });
   }
   return result;
@@ -252,9 +239,7 @@ function recommend(events, limit = 30) {
 createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
-
   const url = new URL(req.url, `http://localhost:${PORT}`);
-  const catalogMap = new Map(catalog.map(a => [a.id, a]));
 
   if (url.pathname === "/v2" || url.pathname === "/v2/" || url.pathname === "/") {
     const html = readFileSync(resolve(__dirname, "src", "app", "page.html"), "utf8");
@@ -275,9 +260,8 @@ createServer(async (req, res) => {
     req.on("end", () => {
       try {
         const { events, limit } = JSON.parse(body);
-        const items = recommend(events, limit || 30);
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ items }));
+        res.end(JSON.stringify({ items: recommend(events, limit || 30) }));
       } catch (e) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: e.message }));
@@ -286,18 +270,15 @@ createServer(async (req, res) => {
     return;
   }
 
-  // Features API — title index only (no embeddings)
+  // Title index API
   if (url.pathname === "/api/v2/features") {
     const titles = {};
-    for (const a of catalog) {
-      if (a.title) titles[a.id] = a.title;
-    }
+    for (const a of catalog) if (a.title) titles[a.id] = a.title;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ dim: 0, titles, count: Object.keys(titles).length }));
     return;
   }
 
-  // 404
   res.writeHead(404);
   res.end("Not found");
 }).listen(PORT, () => {
