@@ -153,35 +153,41 @@
     function CardFlow({ events, onEvents }) {
       const [queue, setQueue] = useState([]);
       const [rated, setRated] = useState(0);
-      const [loading, setLoading] = useState(false);
+      const [loading, setLoading] = useState(true);
+      const [fetching, setFetching] = useState(false);
 
-      const refetch = useCallback(() => {
-        setLoading(true);
-        fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({events, limit: 30}), headers: {"content-type":"application/json"} })
+      const doFetch = useCallback((evts) => {
+        setFetching(true);
+        fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({events: evts, limit: 60}), headers: {"content-type":"application/json"} })
           .then(r => r.json())
-          .then(d => { setQueue(d.items || []); setLoading(false); })
-          .catch(e => { console.error('Fetch failed:', e); setLoading(false); setQueue([]); });
-      }, [events]);
+          .then(d => { setQueue(q => [...q, ...(d.items || [])]); setLoading(false); setFetching(false); })
+          .catch(e => { console.error('Fetch failed:', e); setFetching(false); });
+      }, []);
 
-      useEffect(() => { refetch(); }, [JSON.stringify(events)]);
+      useEffect(() => { setQueue([]); setLoading(true); doFetch(events); }, [JSON.stringify(events)]);
 
       const rate = (action) => {
         const current = queue[0];
         if (!current) return;
-        if (events.some(e => e.animeId === current.id && e.action !== "click" && e.action !== "skip")) { setQueue(queue.slice(1)); return; }
-        if (!current) return;
+        if (events.some(e => e.animeId === current.id && e.action !== "click" && e.action !== "skip")) { setQueue(q => q.slice(1)); return; }
         const event = { animeId: current.id, action, context: "recommendation", at: Date.now() };
         const newEvents = [...events, event];
         saveEvents(newEvents);
         onEvents(newEvents);
-        setRated(rated + 1);
-        setQueue(queue.slice(1));
-        if (queue.length < 10) refetch();
+        setRated(r => r + 1);
+        // Show next card instantly; refetch in background if queue running low
+        setQueue(q => {
+          const next = q.slice(1);
+          if (next.length < 15 && !fetching) {
+            setTimeout(() => doFetch(newEvents), 100);
+          }
+          return next;
+        });
       };
 
       if (loading && queue.length === 0) return html`<div class="loading">Generating your recommendations...</div>`;
       const current = queue[0];
-      if (!current) return html`<div class="loading">No more anime in this catalog. How about adding some new ones?</div>`;
+      if (!current) return html`<div class="loading">${fetching ? "Fetching more..." : "No more anime in this catalog. How about adding some new ones?"}</div>`;
 
       return html`<main class="card-page">
         <div class="card-stage">

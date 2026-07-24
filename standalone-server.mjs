@@ -72,6 +72,15 @@ function getSeedCards(count) {
     "进击的巨人", "千与千寻", "哈尔的移动城堡", "你的名字。",
     "名侦探柯南", "航海王", "龙猫", "幽灵公主", "天空之城",
     "银魂", "夏目友人帐", "死亡笔记",
+    // widely known additions
+    "化物语", "魔法禁书目录", "Fate/stay night", "凉宫春日的忧郁",
+    "灼眼的夏娜", "钢之炼金术师", "未闻花名", "K-ON!",
+    "Angel Beats!", "四月是你的谎言", "吹响吧！上低音号",
+    "一拳超人", "辉夜大小姐想让我告白", "无职转生",
+    "葬送的芙莉莲", "更衣人偶坠入爱河", "败犬女主太多了！",
+    "BanG Dream! It's MyGO!!!!!", "【我推的孩子】",
+    "秒速5厘米", "天气之子", "铃芽之旅",
+    "排球少年", "灌篮高手",
   ];
 
   const usedSeries = new Set();
@@ -193,24 +202,28 @@ function recommend(events, limit = 30) {
     scores.push({ id, seriesKey: entry.seriesKey, score: best + popBonus + yearBonus + noveltyBonus });
   }
 
-  const avoided = new Set();
+  // Negative: block same seriesKey, light penalty for very-near items only
+  const avoidedSK = new Set();
   for (const e of events) {
     const entry = catMap.get(String(e.animeId));
-    if (entry && ["avoid","terrible","mild_dislike"].includes(e.action)) avoided.add(entry.seriesKey);
+    if (entry && ["avoid","terrible","mild_dislike"].includes(e.action)) avoidedSK.add(entry.seriesKey);
   }
-  if (avoided.size > 0) {
+  if (avoidedSK.size > 0) {
     for (const s of scores) {
+      if (avoidedSK.has(s.seriesKey)) { s.score -= 999; continue; }
       const ci = idToIndex.get(String(s.id));
       if (ci === undefined) continue;
       let maxSim = 0;
-      for (const ask of avoided) {
+      for (const ask of avoidedSK) {
         const aEntry = catalog.find(a => a.seriesKey === ask && idToIndex.has(String(a.id)));
         if (!aEntry) continue;
         const ai = idToIndex.get(String(aEntry.id));
         if (ai === undefined) continue;
-        if (cosine(factors[ci], factors[ai]) > maxSim) maxSim = cos(factors[ci], factors[ai]);
+        const sim = cosine(factors[ci], factors[ai]);
+        if (sim > maxSim) maxSim = sim;
       }
-      if (maxSim > 0.35) s.score -= (maxSim - 0.35) * 0.6;
+      // Only penalize VERY close neighbors (>0.75 cos), and lightly
+      if (maxSim > 0.75) s.score -= (maxSim - 0.75) * 0.25;
     }
   }
 
@@ -257,7 +270,7 @@ createServer(async (req, res) => {
 
   if (url.pathname === "/api/v2/onboarding") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ items: getSeedCards(20) }));
+    res.end(JSON.stringify({ items: getSeedCards(40) }));
     return;
   }
 
