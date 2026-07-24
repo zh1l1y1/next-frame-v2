@@ -107,7 +107,7 @@
 
   <script type="module">
     import { h, render } from "preact";
-    import { useState, useEffect, useCallback } from "preact/hooks";
+    import { useState, useEffect, useCallback, useRef } from "preact/hooks";
     import { html } from "htm/preact";
 
     const API = "/api/v2";
@@ -155,16 +155,32 @@
       const [rated, setRated] = useState(0);
       const [loading, setLoading] = useState(true);
       const [fetching, setFetching] = useState(false);
+      // Track seen seriesKeys client-side to prevent duplicates across fetches
+      const seenSK = useRef(new Set());
 
       const doFetch = useCallback((evts) => {
         setFetching(true);
-        fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({events: evts, limit: 60}), headers: {"content-type":"application/json"} })
+        fetch(`${API}/recommendations`, { method: "POST", body: JSON.stringify({events: evts, limit: 50}), headers: {"content-type":"application/json"} })
           .then(r => r.json())
-          .then(d => { setQueue(q => [...q, ...(d.items || [])]); setLoading(false); setFetching(false); })
+          .then(d => {
+            const newItems = (d.items || []).filter(a => !seenSK.current.has(a.seriesKey));
+            for (const a of newItems) seenSK.current.add(a.seriesKey);
+            setQueue(q => [...q, ...newItems]);
+            setLoading(false); setFetching(false);
+          })
           .catch(e => { console.error('Fetch failed:', e); setFetching(false); });
       }, []);
 
-      useEffect(() => { setQueue([]); setLoading(true); doFetch(events); }, [JSON.stringify(events)]);
+      useEffect(() => {
+        seenSK.current = new Set();
+        // Pre-seed SKs from events
+        for (const e of events) {
+          if (["masterpiece","interesting","like","seed","wishlist"].includes(e.action)) {
+            // We don't know the seriesKey from events alone, but the server dedup handles it
+          }
+        }
+        setQueue([]); setLoading(true); doFetch(events);
+      }, [JSON.stringify(events)]);
 
       const rate = (action) => {
         const current = queue[0];
@@ -179,7 +195,7 @@
         setQueue(q => {
           const next = q.slice(1);
           if (next.length < 15 && !fetching) {
-            setTimeout(() => doFetch(newEvents), 100);
+            setTimeout(() => doFetch(newEvents), 50);
           }
           return next;
         });
